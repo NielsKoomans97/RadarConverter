@@ -9,21 +9,77 @@ namespace RadarConverter
     {
         private static async Task Main(string[] args)
         {
-            var path1 = args[0];
-            var path2 = args[1];
-            var path3 = args[2];
-
-            var converter = new Converter();
-            converter.PrecipTypeMaps = Directory.GetFiles(path1);
-            converter.PrecipMaps = Directory.GetFiles(path2);
-            converter.OutputPath = path3;
-
-            converter.ProgressChanged += (sender, value) =>
+            if (args[0] == "update")
             {
-                Console.WriteLine($"{value.Message}   [{value.Value}%]\r");
-            };
+                await UpdateChartsAsync();
+            }
+            else
+            {
+                var path1 = args[0];
+                var path2 = args[1];
+                var path3 = args[2];
 
-            await converter.ProcessAsync();
+                var converter = new Converter();
+                converter.PrecipTypeMaps = Directory.GetFiles(path1);
+                converter.PrecipMaps = Directory.GetFiles(path2);
+                converter.OutputPath = path3;
+
+                converter.ProgressChanged += (sender, value) =>
+                {
+                    Console.WriteLine($"{value.Message}   [{value.Value}%]\r");
+                };
+
+                await converter.ProcessAsync();
+            }
+        }
+
+        private static async Task UpdateChartsAsync()
+        {
+            using (var httpClient = new HttpClient())
+            {
+                for (int i = 0; i < 49; i++)
+                {
+                    var simRadarUrl = $"https://dev.weercijfers.nl/static/harmonie/benelux/simradar_0{FixInt(i)}00.png";
+                    await SaveImageAsync(httpClient, simRadarUrl, "simradar");
+
+                    if (i > 0)
+                    {
+                        var pcpTypeUrl = $"https://dev.weercijfers.nl/static/harmonie/benelux/pcptype_0{FixInt(i)}00.png";
+                        await SaveImageAsync(httpClient, pcpTypeUrl, "pcptype", $"pcptype_0{FixInt(i - 1)}00.png");
+                    }
+                }
+            }
+        }
+
+        private static async Task SaveImageAsync(HttpClient httpClient, string url, string outputPath, string specialPath = "")
+        {
+            var outputFile = Path.Combine(outputPath, Path.GetFileName(url));
+
+            if (!string.IsNullOrEmpty(specialPath))
+            {
+                outputFile = Path.Combine(outputPath, specialPath);
+            }
+
+            using (var stream = await httpClient.GetStreamAsync(url))
+            using (var image = Image.FromStream(stream))
+            {
+                image.Save(outputFile);
+            }
+        }
+
+        private static string FixInt(int value)
+        {
+            if (value < 10)
+            {
+                if (value == 0)
+                {
+                    return "00";
+                }
+
+                return $"0{value}";
+            }
+
+            return value.ToString();
         }
     }
 
@@ -137,7 +193,7 @@ namespace RadarConverter
             }
         }
 
-        private int CalculateColorIntensity(int intensityColor, int colorValue, int index)
+        private int CalculateColorIntensity(int colorValue, int index)
         {
             int minvalue = ((colorValue / 25) * index);
             int newvalue = 100 - minvalue;
@@ -149,9 +205,9 @@ namespace RadarConverter
 
         private Color SetColorIntensity(Color color, int index)
         {
-            int r = CalculateColorIntensity(IntensityColors[index].R, color.R, index);
-            int g = CalculateColorIntensity(IntensityColors[index].G, color.G, index);
-            int b = CalculateColorIntensity(IntensityColors[index].B, color.B, index);
+            int r = CalculateColorIntensity(color.R, index);
+            int g = CalculateColorIntensity(color.G, index);
+            int b = CalculateColorIntensity(color.B, index);
 
             if (r < 0) r = 0;
             if (g < 0) g = 0;
@@ -173,7 +229,7 @@ namespace RadarConverter
             for (int x = 0; x < radar.Width; x++)
                 for (int y = 0; y < radar.Height; y++)
                 {
-                    if (HasIntensityColor(radar.GetPixel(x, y)))
+                    if (IntensityColors.Contains(radar.GetPixel(x, y)))
                     {
                         var radarPixel = radar.GetPixel(x, y);
                         var typePixel = type.GetPixel(x, y);
@@ -196,6 +252,10 @@ namespace RadarConverter
                             {
                                 lastTypeColor = SnowIntensityColors[2];
                             }
+                        }
+                        else
+                        {
+                            lastTypeColor = radarPixel;
                         }
 
                         radar.SetPixel(x, y, SetColorIntensity(lastTypeColor, index));
